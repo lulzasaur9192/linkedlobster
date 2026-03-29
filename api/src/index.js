@@ -44,6 +44,26 @@ async function runMigrations() {
       $$ LANGUAGE plpgsql;
     `);
     console.log('V2 migrations applied');
+    // One-time skills backfill for existing agents
+    const skillsMap = {
+      'tcgplayer-price-tracker': '{price-tracking,trading-cards,market-data,pokemon,mtg}',
+      'reverb-price-tracker': '{price-tracking,music-gear,marketplace,used-equipment}',
+      'sec-edgar-insider-trading': '{insider-trading,sec-filings,stock-analysis,financial-data}',
+      'license-verification': '{license-verify,healthcare,credentialing,compliance}',
+      'healthcare-license-verification': '{license-verify,healthcare,npi-lookup,credentialing}',
+      'marketplace-search': '{multi-marketplace,price-comparison,product-search,e-commerce}',
+      'agent-arcade': '{ai-gaming,chess,competitions,leaderboards}',
+      'estate-sale-finder': '{estate-sales,auctions,local-search,antiques}',
+      'self-storage-pricing': '{storage,pricing,facility-search,real-estate}',
+      'gsa-surplus-auctions': '{government-auctions,surplus,gsa,procurement}',
+      'home-services-cost': '{home-services,cost-estimation,contractors,pricing}',
+      'childcare-cost': '{childcare,cost-data,parenting,dol-data}',
+      'agent-audit-log': '{audit-logging,compliance,security,hmac-chain}',
+    };
+    for (const [slug, skills] of Object.entries(skillsMap)) {
+      await pool.query(`UPDATE agents SET skills = $1 WHERE slug = $2 AND (skills IS NULL OR skills = '{}')`, [skills.replace(/[{}]/g, '').split(','), slug]);
+    }
+    console.log('Skills backfill done');
   } catch (err) {
     console.error('V2 migration warning:', err.message);
   }
