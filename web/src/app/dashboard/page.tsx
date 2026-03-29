@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { api, isLoggedIn } from '@/lib/api';
-import type { Agent, User } from '@/lib/types';
+import type { Agent, User, ApiKey } from '@/lib/types';
 import { PROTOCOLS, CATEGORIES } from '@/lib/types';
 import ProtocolBadge from '@/components/ProtocolBadge';
 
@@ -13,11 +13,17 @@ export default function Dashboard() {
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // API keys
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+  const [newKeyName, setNewKeyName] = useState('');
+  const [newKeyRaw, setNewKeyRaw] = useState<string | null>(null);
+
   // New agent form
   const [form, setForm] = useState({
     name: '', tagline: '', description: '', category: 'other',
     protocol: 'rest', endpoint_url: '', mcp_package: '', mcp_tool: '',
     tags: '', credits_per_task: 5,
+    skills: '', documentation: '', source_url: '',
   });
 
   useEffect(() => {
@@ -26,6 +32,7 @@ export default function Dashboard() {
       api('/api/auth/me').then(d => setUser(d.user)),
       api('/api/agents/my/list').then(d => setAgents(d.agents || [])),
       api('/api/credits/earnings').then(d => setEarnings(d)).catch(() => {}),
+      api('/api/auth/api-keys').then(d => setApiKeys(d.keys || [])).catch(() => {}),
     ]).finally(() => setLoading(false));
   }, []);
 
@@ -35,12 +42,39 @@ export default function Dashboard() {
       const body = {
         ...form,
         tags: form.tags.split(',').map(t => t.trim()).filter(Boolean),
+        skills: form.skills.split(',').map(s => s.trim()).filter(Boolean),
         credits_per_task: +form.credits_per_task,
+        documentation: form.documentation || undefined,
+        source_url: form.source_url || undefined,
       };
       const data = await api('/api/agents', { method: 'POST', body: JSON.stringify(body) });
       setAgents([data.agent, ...agents]);
       setShowForm(false);
-      setForm({ name: '', tagline: '', description: '', category: 'other', protocol: 'rest', endpoint_url: '', mcp_package: '', mcp_tool: '', tags: '', credits_per_task: 5 });
+      setForm({ name: '', tagline: '', description: '', category: 'other', protocol: 'rest', endpoint_url: '', mcp_package: '', mcp_tool: '', tags: '', credits_per_task: 5, skills: '', documentation: '', source_url: '' });
+    } catch (err: unknown) {
+      alert((err as Error).message);
+    }
+  };
+
+  const handleGenerateKey = async () => {
+    try {
+      const data = await api('/api/auth/api-keys', {
+        method: 'POST',
+        body: JSON.stringify({ name: newKeyName || 'Default' }),
+      });
+      setNewKeyRaw(data.key);
+      setApiKeys([{ id: data.id, key_prefix: data.key_prefix, name: data.name, last_used_at: null, created_at: data.created_at }, ...apiKeys]);
+      setNewKeyName('');
+    } catch (err: unknown) {
+      alert((err as Error).message);
+    }
+  };
+
+  const handleRevokeKey = async (id: string) => {
+    if (!confirm('Revoke this API key? This cannot be undone.')) return;
+    try {
+      await api(`/api/auth/api-keys/${id}`, { method: 'DELETE' });
+      setApiKeys(apiKeys.filter(k => k.id !== id));
     } catch (err: unknown) {
       alert((err as Error).message);
     }
@@ -72,6 +106,43 @@ export default function Dashboard() {
             <div className="text-xl font-bold text-linkedin-text">{s.value}</div>
           </div>
         ))}
+      </div>
+
+      {/* API Keys */}
+      <div className="bg-white rounded-lg border border-linkedin-border p-4 mb-6">
+        <h2 className="font-semibold text-linkedin-text mb-3">API Keys</h2>
+        <p className="text-xs text-linkedin-secondary mb-3">Use API keys to authenticate programmatic requests. Pass via <code className="bg-gray-100 px-1 rounded">X-API-Key</code> header.</p>
+
+        {newKeyRaw && (
+          <div className="mb-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+            <div className="text-xs text-green-800 font-medium mb-1">New API key created (copy now — it won&apos;t be shown again):</div>
+            <code className="text-sm text-green-900 font-mono break-all select-all">{newKeyRaw}</code>
+            <button onClick={() => { navigator.clipboard.writeText(newKeyRaw); }} className="ml-2 text-xs text-green-700 hover:text-green-900 underline">Copy</button>
+          </div>
+        )}
+
+        <div className="flex gap-2 mb-3">
+          <input value={newKeyName} onChange={e => setNewKeyName(e.target.value)} placeholder="Key name (optional)"
+            className="flex-1 h-9 px-3 text-sm border border-linkedin-border rounded focus:outline-none focus:ring-1 focus:ring-lobster-400" />
+          <button onClick={handleGenerateKey} className="px-4 py-1.5 bg-lobster-500 text-white text-sm rounded-full hover:bg-lobster-600 transition">
+            Generate Key
+          </button>
+        </div>
+
+        {apiKeys.length > 0 && (
+          <div className="divide-y divide-linkedin-border border border-linkedin-border rounded-lg">
+            {apiKeys.map(k => (
+              <div key={k.id} className="flex items-center gap-3 px-3 py-2 text-sm">
+                <code className="text-xs font-mono text-linkedin-secondary">{k.key_prefix}...</code>
+                <span className="text-linkedin-text">{k.name}</span>
+                <span className="text-xs text-linkedin-secondary ml-auto">
+                  {k.last_used_at ? `Last used ${new Date(k.last_used_at).toLocaleDateString()}` : 'Never used'}
+                </span>
+                <button onClick={() => handleRevokeKey(k.id)} className="text-xs text-red-600 hover:text-red-800">Revoke</button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Buy credits */}
@@ -171,14 +242,31 @@ export default function Dashboard() {
               )}
 
               <div>
+                <label className="block text-xs font-medium text-linkedin-secondary mb-1">Skills (comma-separated)</label>
+                <input value={form.skills} onChange={e => setForm({ ...form, skills: e.target.value })}
+                  className="w-full h-9 px-3 text-sm border border-linkedin-border rounded focus:outline-none focus:ring-1 focus:ring-lobster-400" placeholder="price-tracking, market-data, scraping" />
+              </div>
+              <div>
                 <label className="block text-xs font-medium text-linkedin-secondary mb-1">Tags (comma-separated)</label>
                 <input value={form.tags} onChange={e => setForm({ ...form, tags: e.target.value })}
                   className="w-full h-9 px-3 text-sm border border-linkedin-border rounded focus:outline-none focus:ring-1 focus:ring-lobster-400" placeholder="ai, scraper, data" />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-linkedin-secondary mb-1">Source URL</label>
+                <input value={form.source_url} onChange={e => setForm({ ...form, source_url: e.target.value })}
+                  className="w-full h-9 px-3 text-sm border border-linkedin-border rounded focus:outline-none focus:ring-1 focus:ring-lobster-400" placeholder="https://github.com/you/repo" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-linkedin-secondary mb-1">Credits per Task</label>
                 <input type="number" min={1} max={1000} value={form.credits_per_task} onChange={e => setForm({ ...form, credits_per_task: +e.target.value })}
                   className="w-full h-9 px-3 text-sm border border-linkedin-border rounded focus:outline-none focus:ring-1 focus:ring-lobster-400" />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-xs font-medium text-linkedin-secondary mb-1">Documentation</label>
+                <textarea value={form.documentation} onChange={e => setForm({ ...form, documentation: e.target.value })}
+                  className="w-full h-20 p-3 text-sm border border-linkedin-border rounded resize-none focus:outline-none focus:ring-1 focus:ring-lobster-400" placeholder="Usage instructions, expected inputs/outputs, notes..." />
               </div>
             </div>
             <button type="submit" className="mt-4 px-6 py-2 bg-lobster-500 text-white text-sm rounded-full font-medium hover:bg-lobster-600 transition">

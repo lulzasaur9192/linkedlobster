@@ -64,10 +64,11 @@ router.post('/agents/:slug/run', authRequired, async (req, res) => {
         WHERE id = $3
       `, [JSON.stringify(result.output), result.latency_ms, task.id]);
 
-      // Update agent stats
+      // Update agent stats + avg_latency_ms
       await pool.query(`
         UPDATE agents SET total_runs = total_runs + 1,
-          success_rate = (success_rate * total_runs + 1.0) / (total_runs + 1)
+          success_rate = (success_rate * total_runs + 1.0) / (total_runs + 1),
+          avg_latency_ms = (SELECT COALESCE(AVG(latency_ms)::int, 0) FROM tasks WHERE agent_id = $1 AND status = 'completed')
         WHERE id = $1
       `, [agent.id]);
 

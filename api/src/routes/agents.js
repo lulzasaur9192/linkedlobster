@@ -51,7 +51,7 @@ router.get('/', authOptional, async (req, res) => {
   }
 });
 
-// Get single agent by slug
+// Get single agent by slug (enriched with rating_distribution + recent_tasks)
 router.get('/:slug', authOptional, async (req, res) => {
   try {
     const { rows } = await pool.query(`
@@ -61,26 +61,56 @@ router.get('/:slug', authOptional, async (req, res) => {
     `, [req.params.slug]);
     if (!rows[0]) return res.status(404).json({ error: 'Agent not found' });
 
-    // Get recent reviews
-    const reviewsRes = await pool.query(`
-      SELECT r.*, u.name as reviewer_name, u.avatar_url as reviewer_avatar
-      FROM reviews r JOIN users u ON r.user_id = u.id
-      WHERE r.agent_id = $1
-      ORDER BY r.created_at DESC LIMIT 10
-    `, [rows[0].id]);
+    const agentId = rows[0].id;
 
-    res.json({ agent: rows[0], reviews: reviewsRes.rows });
+    // Get reviews, rating distribution, and recent tasks in parallel
+    const [reviewsRes, ratingRes, tasksRes] = await Promise.all([
+      pool.query(`
+        SELECT r.*, u.name as reviewer_name, u.avatar_url as reviewer_avatar
+        FROM reviews r JOIN users u ON r.user_id = u.id
+        WHERE r.agent_id = $1
+        ORDER BY r.created_at DESC LIMIT 10
+      `, [agentId]),
+      pool.query(`
+        SELECT rating, COUNT(*)::int as count
+        FROM reviews WHERE agent_id = $1
+        GROUP BY rating ORDER BY rating DESC
+      `, [agentId]),
+      pool.query(`
+        SELECT id, status, latency_ms, credits_charged, is_featured,
+          LEFT(input::text, 200) as input_preview,
+          LEFT(output::text, 200) as output_preview,
+          completed_at
+        FROM tasks
+        WHERE agent_id = $1 AND status = 'completed'
+        ORDER BY is_featured DESC, completed_at DESC LIMIT 10
+      `, [agentId]),
+    ]);
+
+    // Build rating distribution map {5: count, 4: count, ...}
+    const rating_distribution = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+    for (const row of ratingRes.rows) {
+      rating_distribution[row.rating] = row.count;
+    }
+
+    res.json({
+      agent: rows[0],
+      reviews: reviewsRes.rows,
+      rating_distribution,
+      recent_tasks: tasksRes.rows,
+    });
   } catch (err) {
     console.error('Get agent error:', err);
     res.status(500).json({ error: 'Failed to get agent' });
   }
 });
 
-// Register new agent
+// Register new agent (with skills, documentation, source_url, examples)
 router.post('/', authRequired, async (req, res) => {
   const { name, tagline, description, category, tags, protocol, endpoint_url,
           mcp_package, mcp_tool, openclaw_package, openclaw_skill,
-          input_schema, output_schema, credits_per_task } = req.body;
+          input_schema, output_schema, credits_per_task,
+          skills, examples, documentation, source_url } = req.body;
 
   if (!name || !protocol) return res.status(400).json({ error: 'name and protocol required' });
 
@@ -95,15 +125,18 @@ router.post('/', authRequired, async (req, res) => {
     const { rows } = await pool.query(`
       INSERT INTO agents (owner_id, slug, name, tagline, description, category, tags, protocol,
         endpoint_url, mcp_package, mcp_tool, openclaw_package, openclaw_skill,
-        input_schema, output_schema, credits_per_task)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+        input_schema, output_schema, credits_per_task,
+        skills, examples, documentation, source_url)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
       RETURNING *
     `, [req.user.id, slug, name, tagline || null, description || null,
         category || 'other', tags || [], protocol,
         endpoint_url || null, mcp_package || null, mcp_tool || null,
         openclaw_package || null, openclaw_skill || null,
         JSON.stringify(input_schema || {}), JSON.stringify(output_schema || {}),
-        credits_per_task || 5]);
+        credits_per_task || 5,
+        skills || [], JSON.stringify(examples || []),
+        documentation || null, source_url || null]);
 
     res.status(201).json({ agent: rows[0] });
   } catch (err) {
@@ -113,17 +146,18 @@ router.post('/', authRequired, async (req, res) => {
   }
 });
 
-// Update agent
+// Update agent (with new fields)
 router.patch('/:slug', authRequired, async (req, res) => {
   const allowed = ['name', 'tagline', 'description', 'category', 'tags', 'endpoint_url',
     'mcp_package', 'mcp_tool', 'openclaw_package', 'openclaw_skill',
-    'input_schema', 'output_schema', 'credits_per_task', 'is_public'];
+    'input_schema', 'output_schema', 'credits_per_task', 'is_public',
+    'skills', 'examples', 'documentation', 'source_url'];
 
   const updates = [];
   const values = [];
   for (const [key, val] of Object.entries(req.body)) {
     if (allowed.includes(key)) {
-      values.push(key.includes('schema') ? JSON.stringify(val) : val);
+      values.push(key.includes('schema') || key === 'examples' ? JSON.stringify(val) : val);
       updates.push(`${key} = $${values.length}`);
     }
   }
@@ -140,6 +174,25 @@ router.patch('/:slug', authRequired, async (req, res) => {
   } catch (err) {
     console.error('Update agent error:', err);
     res.status(500).json({ error: 'Failed to update agent' });
+  }
+});
+
+// Toggle featured on a task (owner only)
+router.patch('/:slug/tasks/:taskId/feature', authRequired, async (req, res) => {
+  try {
+    // Verify ownership
+    const agentRes = await pool.query('SELECT id FROM agents WHERE slug = $1 AND owner_id = $2', [req.params.slug, req.user.id]);
+    if (!agentRes.rows[0]) return res.status(404).json({ error: 'Agent not found or not yours' });
+
+    const { rows } = await pool.query(
+      'UPDATE tasks SET is_featured = NOT is_featured WHERE id = $1 AND agent_id = $2 RETURNING id, is_featured',
+      [req.params.taskId, agentRes.rows[0].id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Task not found' });
+    res.json({ task: rows[0] });
+  } catch (err) {
+    console.error('Feature toggle error:', err);
+    res.status(500).json({ error: 'Failed to toggle featured' });
   }
 });
 

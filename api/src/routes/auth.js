@@ -1,6 +1,7 @@
 import { Router } from 'express';
+import crypto from 'crypto';
 import pool from '../db/pool.js';
-import { signToken } from '../middleware/auth.js';
+import { signToken, authRequired } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -52,6 +53,57 @@ router.get('/me', async (req, res) => {
     res.json({ user: rows[0] });
   } catch {
     res.status(401).json({ error: 'Invalid token' });
+  }
+});
+
+// --- API Key Management ---
+
+// Generate a new API key
+router.post('/api-keys', authRequired, async (req, res) => {
+  const { name } = req.body;
+  const rawKey = 'll_' + crypto.randomBytes(20).toString('hex');
+  const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
+  const keyPrefix = rawKey.slice(0, 10);
+
+  try {
+    const { rows } = await pool.query(`
+      INSERT INTO api_keys (user_id, key_hash, key_prefix, name)
+      VALUES ($1, $2, $3, $4) RETURNING id, key_prefix, name, created_at
+    `, [req.user.id, keyHash, keyPrefix, name || 'Default']);
+
+    res.status(201).json({ key: rawKey, ...rows[0] });
+  } catch (err) {
+    console.error('Create API key error:', err);
+    res.status(500).json({ error: 'Failed to create API key' });
+  }
+});
+
+// List API keys
+router.get('/api-keys', authRequired, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, key_prefix, name, last_used_at, created_at FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC',
+      [req.user.id]
+    );
+    res.json({ keys: rows });
+  } catch (err) {
+    console.error('List API keys error:', err);
+    res.status(500).json({ error: 'Failed to list API keys' });
+  }
+});
+
+// Revoke API key
+router.delete('/api-keys/:id', authRequired, async (req, res) => {
+  try {
+    const { rowCount } = await pool.query(
+      'DELETE FROM api_keys WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'API key not found' });
+    res.json({ deleted: true });
+  } catch (err) {
+    console.error('Delete API key error:', err);
+    res.status(500).json({ error: 'Failed to delete API key' });
   }
 });
 

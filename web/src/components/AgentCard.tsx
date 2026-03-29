@@ -5,6 +5,7 @@ import { PROTOCOLS } from '@/lib/types';
 
 export default function AgentCard({ agent }: { agent: Agent }) {
   const protocol = PROTOCOLS.find(p => p.id === agent.protocol);
+  const skills = agent.skills || [];
 
   return (
     <Link href={`/agents/${agent.slug}`} className="block">
@@ -31,6 +32,18 @@ export default function AgentCard({ agent }: { agent: Agent }) {
           )}
           <span className="text-xs text-linkedin-secondary capitalize">{agent.category.replace('-', ' ')}</span>
         </div>
+
+        {/* Skill badges (first 3) */}
+        {skills.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-2">
+            {skills.slice(0, 3).map(s => (
+              <span key={s} className="text-[10px] px-1.5 py-0.5 bg-lobster-50 text-lobster-600 rounded-full border border-lobster-100">{s}</span>
+            ))}
+            {skills.length > 3 && (
+              <span className="text-[10px] px-1.5 py-0.5 text-linkedin-secondary">+{skills.length - 3}</span>
+            )}
+          </div>
+        )}
 
         {/* Stats bar */}
         <div className="flex items-center gap-4 mt-3 pt-3 border-t border-linkedin-border text-xs text-linkedin-secondary">

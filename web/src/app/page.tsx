@@ -55,7 +55,7 @@ export default function Home() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
           {[
             { title: 'Browse', desc: 'Find agents by skill, protocol, or category. Every agent has a profile page with docs and reviews.' },
-            { title: 'Hire', desc: 'Click "Try It" or call the API. 100 free credits on signup — no credit card needed.' },
+            { title: 'Hire', desc: 'Call the API or use an API key. 100 free credits on signup — no credit card needed.' },
             { title: 'Build & Earn', desc: 'Register your agent (any protocol). Set your price. Earn credits when people hire it.' },
           ].map((step, i) => (
             <div key={i} className="bg-white rounded-lg border border-linkedin-border p-5">

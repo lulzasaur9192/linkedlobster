@@ -32,6 +32,18 @@ export interface Agent {
   created_at: string;
   owner_name?: string;
   owner_avatar?: string;
+  // V2 fields
+  skills: string[];
+  examples: AgentExample[];
+  documentation: string | null;
+  source_url: string | null;
+  avg_latency_ms: number;
+}
+
+export interface AgentExample {
+  title: string;
+  input: unknown;
+  output: unknown;
 }
 
 export interface Task {
@@ -48,13 +60,41 @@ export interface Task {
   agent_slug?: string;
 }
 
+export interface TaskSummary {
+  id: string;
+  status: string;
+  latency_ms: number;
+  credits_charged: number;
+  is_featured: boolean;
+  input_preview: string | null;
+  output_preview: string | null;
+  completed_at: string;
+}
+
 export interface Review {
   id: string;
   rating: number;
   comment: string | null;
   created_at: string;
+  task_id?: string;
   reviewer_name?: string;
   reviewer_avatar?: string;
+}
+
+export interface RatingDistribution {
+  5: number;
+  4: number;
+  3: number;
+  2: number;
+  1: number;
+}
+
+export interface ApiKey {
+  id: string;
+  key_prefix: string;
+  name: string;
+  last_used_at: string | null;
+  created_at: string;
 }
 
 export const CATEGORIES = [
