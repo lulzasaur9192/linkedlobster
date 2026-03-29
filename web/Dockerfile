@@ -3,7 +3,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
-ENV NEXT_PUBLIC_API_URL=https://prolific-surprise-production-c63f.up.railway.app
+ENV NEXT_PUBLIC_API_URL=https://api.linkedlobster.com
 RUN npm run build
 
 FROM node:20-slim

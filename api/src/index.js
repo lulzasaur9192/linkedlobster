@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 4000;
 
 // Middleware
 app.use(helmet());
-app.use(cors({ origin: process.env.FRONTEND_URL || true, credentials: true }));
+app.use(cors({ origin: [process.env.FRONTEND_URL || 'https://linkedlobster.com', 'https://linkedlobster.com', 'https://considerate-heart-production-46b0.up.railway.app'], credentials: true }));
 app.use(morgan('short'));
 app.use(express.json({ limit: '1mb' }));
 
