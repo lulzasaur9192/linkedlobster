@@ -101,10 +101,19 @@ CREATE INDEX IF NOT EXISTS idx_tasks_user ON tasks(user_id);
 CREATE INDEX IF NOT EXISTS idx_reviews_agent ON reviews(agent_id);
 CREATE INDEX IF NOT EXISTS idx_credit_tx_user ON credit_transactions(user_id);
 
--- Full-text search index
-CREATE INDEX IF NOT EXISTS idx_agents_search ON agents USING gin(
-  to_tsvector('english', coalesce(name,'') || ' ' || coalesce(tagline,'') || ' ' || coalesce(description,'') || ' ' || array_to_string(tags, ' '))
-);
+-- Full-text search: add a tsvector column updated by trigger
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS search_vec tsvector;
+CREATE INDEX IF NOT EXISTS idx_agents_search ON agents USING gin(search_vec);
+
+CREATE OR REPLACE FUNCTION agents_search_update() RETURNS trigger AS $$
+BEGIN
+  NEW.search_vec := to_tsvector('english', coalesce(NEW.name,'') || ' ' || coalesce(NEW.tagline,'') || ' ' || coalesce(NEW.description,'') || ' ' || array_to_string(NEW.tags, ' '));
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS agents_search_trigger ON agents;
+CREATE TRIGGER agents_search_trigger BEFORE INSERT OR UPDATE ON agents FOR EACH ROW EXECUTE FUNCTION agents_search_update();
 `;
 
 try {

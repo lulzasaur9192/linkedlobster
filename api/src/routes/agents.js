@@ -13,7 +13,7 @@ router.get('/', authOptional, async (req, res) => {
 
   if (q) {
     params.push(q);
-    conditions.push(`to_tsvector('english', coalesce(a.name,'') || ' ' || coalesce(a.tagline,'') || ' ' || coalesce(a.description,'') || ' ' || array_to_string(a.tags, ' ')) @@ plainto_tsquery('english', $${params.length})`);
+    conditions.push(`a.search_vec @@ plainto_tsquery('english', $${params.length})`);
   }
   if (category) {
     params.push(category);
